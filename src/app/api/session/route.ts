@@ -31,7 +31,12 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ session });
   } catch (error) {
-    return respondWithError(error, 500);
+    const status =
+      error instanceof Error && error.message === "A session id is required."
+        ? 400
+        : 500;
+
+    return respondWithError(error, status);
   }
 }
 

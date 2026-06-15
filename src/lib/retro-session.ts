@@ -18,7 +18,6 @@ export type RetroSession = {
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24;
 const DEFAULT_DURATION_MINUTES = 10;
-const DEFAULT_SESSION_ID = "team-retro";
 
 const columnKeys: RetroColumn[] = [
   "wentWell",
@@ -58,7 +57,7 @@ function sessionKey(sessionId: string) {
   return `retro:session:${sessionId}`;
 }
 
-function createDefaultSession(sessionId = DEFAULT_SESSION_ID): RetroSession {
+function createDefaultSession(sessionId: string): RetroSession {
   return {
     id: sessionId,
     durationMinutes: DEFAULT_DURATION_MINUTES,
@@ -107,10 +106,22 @@ async function saveSession(session: RetroSession) {
 }
 
 export function getSessionId(value?: string | null) {
-  return value?.trim() || DEFAULT_SESSION_ID;
+  const sessionId = value
+    ?.trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 64);
+
+  if (!sessionId) {
+    throw new Error("A session id is required.");
+  }
+
+  return sessionId;
 }
 
-export async function getSession(sessionId = DEFAULT_SESSION_ID) {
+export async function getSession(sessionId: string) {
   const client = await getRedis();
   const rawSession = await client.get(sessionKey(sessionId));
   const session = rawSession
