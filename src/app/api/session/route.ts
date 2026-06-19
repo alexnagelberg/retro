@@ -6,20 +6,26 @@ import {
   getSessionId,
   resetSession,
   startSession,
+  stopSession,
+  toggleThumbsUp,
   type RetroColumn,
 } from "@/lib/retro-session";
 
 type SessionRequestBody = {
-  action?: "configure" | "start" | "reset" | "addNote";
+  action?: "configure" | "start" | "stop" | "reset" | "addNote" | "toggleThumbsUp";
   sessionId?: string;
   durationMinutes?: number;
   column?: RetroColumn;
+  noteId?: string;
+  participantId?: string;
   text?: string;
 };
 
 function respondWithError(error: unknown, status = 400) {
   const message =
-    error instanceof Error ? error.message : "Unable to update the session.";
+    error instanceof Error && error.message
+      ? error.message
+      : "Unable to reach the Redis session store.";
 
   return NextResponse.json({ error: message }, { status });
 }
@@ -53,11 +59,22 @@ export async function POST(request: NextRequest) {
       case "start":
         session = await startSession(sessionId, Number(body.durationMinutes));
         break;
+      case "stop":
+        session = await stopSession(sessionId);
+        break;
       case "reset":
         session = await resetSession(sessionId);
         break;
       case "addNote":
         session = await addNote(sessionId, body.column as RetroColumn, body.text ?? "");
+        break;
+      case "toggleThumbsUp":
+        session = await toggleThumbsUp(
+          sessionId,
+          body.column as RetroColumn,
+          body.noteId ?? "",
+          body.participantId ?? "",
+        );
         break;
       default:
         return respondWithError(new Error("Unknown session action."));

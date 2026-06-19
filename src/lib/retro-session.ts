@@ -6,6 +6,7 @@ export type RetroNote = {
   id: string;
   text: string;
   createdAt: number;
+  thumbsUpParticipantIds: string[];
 };
 
 export type RetroSession = {
@@ -16,7 +17,7 @@ export type RetroSession = {
   columns: Record<RetroColumn, RetroNote[]>;
 };
 
-const SESSION_TTL_SECONDS = 60 * 60 * 24;
+const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 const DEFAULT_DURATION_MINUTES = 10;
 
 const columnKeys: RetroColumn[] = [
@@ -81,19 +82,39 @@ function clampDurationMinutes(durationMinutes: number) {
 }
 
 function normalizeSession(session: RetroSession): RetroSession {
-  if (session.status !== "running" || !session.startedAt) {
-    return session;
+  const normalizedSession: RetroSession = {
+    ...session,
+    columns: {
+      wentWell: session.columns.wentWell.map(normalizeNote),
+      needsImprovement: session.columns.needsImprovement.map(normalizeNote),
+      actionItems: session.columns.actionItems.map(normalizeNote),
+      kudos: session.columns.kudos.map(normalizeNote),
+    },
+  };
+
+  if (normalizedSession.status !== "running" || !normalizedSession.startedAt) {
+    return normalizedSession;
   }
 
-  const endsAt = session.startedAt + session.durationMinutes * 60 * 1000;
+  const endsAt =
+    normalizedSession.startedAt + normalizedSession.durationMinutes * 60 * 1000;
 
   if (Date.now() < endsAt) {
-    return session;
+    return normalizedSession;
   }
 
   return {
-    ...session,
+    ...normalizedSession,
     status: "ended",
+  };
+}
+
+function normalizeNote(note: RetroNote): RetroNote {
+  return {
+    ...note,
+    thumbsUpParticipantIds: Array.isArray(note.thumbsUpParticipantIds)
+      ? note.thumbsUpParticipantIds
+      : [],
   };
 }
 
@@ -167,6 +188,19 @@ export async function startSession(sessionId: string, durationMinutes: number) {
   });
 }
 
+export async function stopSession(sessionId: string) {
+  const session = await getSession(sessionId);
+
+  if (session.status !== "running") {
+    return session;
+  }
+
+  return saveSession({
+    ...session,
+    status: "ended",
+  });
+}
+
 export async function resetSession(sessionId: string) {
   return saveSession(createDefaultSession(sessionId));
 }
@@ -196,6 +230,7 @@ export async function addNote(
     id: crypto.randomUUID(),
     text: text.slice(0, 280),
     createdAt: Date.now(),
+    thumbsUpParticipantIds: [],
   };
 
   return saveSession({
@@ -203,6 +238,53 @@ export async function addNote(
     columns: {
       ...session.columns,
       [column]: [note, ...session.columns[column]],
+    },
+  });
+}
+
+export async function toggleThumbsUp(
+  sessionId: string,
+  column: RetroColumn,
+  noteId: string,
+  participantId: string,
+) {
+  if (!columnKeys.includes(column)) {
+    throw new Error("Unknown retro column.");
+  }
+
+  const safeParticipantId = participantId.trim().slice(0, 80);
+
+  if (!safeParticipantId) {
+    throw new Error("A participant id is required.");
+  }
+
+  const session = await getSession(sessionId);
+  const notes = session.columns[column];
+  const noteIndex = notes.findIndex((note) => note.id === noteId);
+
+  if (noteIndex === -1) {
+    throw new Error("Note not found.");
+  }
+
+  const note = normalizeNote(notes[noteIndex]);
+  const hasThumbsUp = note.thumbsUpParticipantIds.includes(safeParticipantId);
+  const thumbsUpParticipantIds = hasThumbsUp
+    ? note.thumbsUpParticipantIds.filter((id) => id !== safeParticipantId)
+    : [...note.thumbsUpParticipantIds, safeParticipantId];
+  const updatedNotes = notes.map((currentNote, index) =>
+    index === noteIndex
+      ? {
+          ...note,
+          thumbsUpParticipantIds,
+        }
+      : currentNote,
+  );
+
+  return saveSession({
+    ...session,
+    columns: {
+      ...session.columns,
+      [column]: updatedNotes,
     },
   });
 }

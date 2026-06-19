@@ -4,6 +4,8 @@ A Next.js sprint retrospective app backed by Redis. Each board lives under a sha
 
 Notes can only be added while the timer is running. The UI disables note entry before and after the timer, and the API enforces the same rule server-side.
 
+Sessions are stored in Redis for 30 days. Boards can be exported offline with the Export PDF button, which downloads a PDF snapshot.
+
 ## Setup
 
 Install dependencies:
