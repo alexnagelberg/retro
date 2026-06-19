@@ -61,6 +61,7 @@ export function RetroBoard({ initialSessionId }: RetroBoardProps) {
     kudos: "",
   });
   const [isSaving, setIsSaving] = useState(false);
+  const [participantId, setParticipantId] = useState("");
   const [error, setError] = useState("");
   const shareUrl = `/${encodeURIComponent(sessionId)}`;
 
@@ -88,8 +89,15 @@ export function RetroBoard({ initialSessionId }: RetroBoardProps) {
   async function updateSession(
     payload:
       | { action: "configure" | "start"; durationMinutes: number }
+      | { action: "stop" }
       | { action: "reset" }
-      | { action: "addNote"; column: RetroColumn; text: string },
+      | { action: "addNote"; column: RetroColumn; text: string }
+      | {
+          action: "toggleThumbsUp";
+          column: RetroColumn;
+          noteId: string;
+          participantId: string;
+        },
   ) {
     if (!sessionId) {
       return;
@@ -114,7 +122,7 @@ export function RetroBoard({ initialSessionId }: RetroBoardProps) {
       setDurationMinutes(data.session.durationMinutes);
     } catch (sessionError) {
       setError(
-        sessionError instanceof Error
+        sessionError instanceof Error && sessionError.message
           ? sessionError.message
           : "Unable to update the retro session.",
       );
@@ -142,7 +150,7 @@ export function RetroBoard({ initialSessionId }: RetroBoardProps) {
           .catch((sessionError) => {
             if (!isCancelled) {
               setError(
-                sessionError instanceof Error
+                sessionError instanceof Error && sessionError.message
                   ? sessionError.message
                   : "Unable to load the retro session.",
               );
@@ -155,7 +163,7 @@ export function RetroBoard({ initialSessionId }: RetroBoardProps) {
     const initialLoad = window.setTimeout(() => {
       loadSession().catch((sessionError) => {
         setError(
-          sessionError instanceof Error
+          sessionError instanceof Error && sessionError.message
             ? sessionError.message
             : "Unable to load the retro session.",
         );
@@ -173,6 +181,21 @@ export function RetroBoard({ initialSessionId }: RetroBoardProps) {
       window.clearInterval(clock);
     };
   }, [loadSession, sessionId]);
+
+  useEffect(() => {
+    const participantTimer = window.setTimeout(() => {
+      let storedParticipantId = window.localStorage.getItem("retroParticipantId");
+
+      if (!storedParticipantId) {
+        storedParticipantId = crypto.randomUUID();
+        window.localStorage.setItem("retroParticipantId", storedParticipantId);
+      }
+
+      setParticipantId(storedParticipantId);
+    }, 0);
+
+    return () => window.clearTimeout(participantTimer);
+  }, []);
 
   const remainingMs = useMemo(() => {
     if (!session?.startedAt || session.status !== "running") {
@@ -211,6 +234,55 @@ export function RetroBoard({ initialSessionId }: RetroBoardProps) {
 
     setDrafts((currentDrafts) => ({ ...currentDrafts, [column]: "" }));
     updateSession({ action: "addNote", column, text });
+  }
+
+  function handleToggleThumbsUp(column: RetroColumn, noteId: string) {
+    if (!participantId) {
+      return;
+    }
+
+    updateSession({
+      action: "toggleThumbsUp",
+      column,
+      noteId,
+      participantId,
+    });
+  }
+
+  async function handleExportPdf() {
+    if (!sessionId) {
+      return;
+    }
+
+    setError("");
+
+    try {
+      const response = await fetch(
+        `/api/session/export?sessionId=${encodeURIComponent(sessionId)}`,
+      );
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error ?? "Unable to export the retro session.");
+      }
+
+      const blob = await response.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+
+      link.href = downloadUrl;
+      link.download = `${sessionId}-retro.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (exportError) {
+      setError(
+        exportError instanceof Error && exportError.message
+          ? exportError.message
+          : "Unable to export the retro session.",
+      );
+    }
   }
 
   function openSession(nextSessionId: string) {
@@ -313,7 +385,7 @@ export function RetroBoard({ initialSessionId }: RetroBoardProps) {
             </div>
           </div>
 
-          <div className="grid gap-3 rounded-lg border border-stone-300 bg-white p-4 shadow-sm sm:grid-cols-[auto_auto_auto] sm:items-end">
+          <div className="no-print grid gap-3 rounded-lg border border-stone-300 bg-white p-4 shadow-sm sm:grid-cols-[auto_auto_auto] sm:items-end">
             <label className="grid gap-1 text-sm font-medium text-stone-700">
               Timer interval
               <input
@@ -330,19 +402,25 @@ export function RetroBoard({ initialSessionId }: RetroBoardProps) {
             </label>
             <button
               className="h-10 rounded-md bg-stone-950 px-4 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-400"
-              disabled={session?.status === "running" || isSaving}
-              onClick={() => updateSession({ action: "start", durationMinutes })}
+              disabled={isSaving}
+              onClick={() =>
+                updateSession(
+                  session?.status === "running"
+                    ? { action: "stop" }
+                    : { action: "start", durationMinutes },
+                )
+              }
               type="button"
             >
-              Start timer
+              {session?.status === "running" ? "Stop timer" : "Start timer"}
             </button>
             <button
               className="h-10 rounded-md border border-stone-300 px-4 text-sm font-semibold text-stone-800 transition hover:border-stone-950 disabled:cursor-not-allowed disabled:text-stone-400"
               disabled={isSaving}
-              onClick={() => updateSession({ action: "reset" })}
+              onClick={handleExportPdf}
               type="button"
             >
-              Reset
+              Export PDF
             </button>
           </div>
         </header>
@@ -363,6 +441,10 @@ export function RetroBoard({ initialSessionId }: RetroBoardProps) {
             Notes open only while the timer is running.
           </p>
         </div>
+
+        <p className="text-sm font-medium text-stone-600">
+          Sessions are stored for 30 days, then expire automatically.
+        </p>
 
         {error ? (
           <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800">
@@ -386,7 +468,7 @@ export function RetroBoard({ initialSessionId }: RetroBoardProps) {
               </div>
 
               <form
-                className="grid gap-2 border-b border-stone-200 p-3"
+                className="no-print grid gap-2 border-b border-stone-200 p-3"
                 onSubmit={(event) => handleAddNote(event, column.key)}
               >
                 <textarea
@@ -422,7 +504,41 @@ export function RetroBoard({ initialSessionId }: RetroBoardProps) {
                       className="rounded-md border border-stone-200 bg-[#fffdf8] p-3 text-sm leading-6 text-stone-800 shadow-sm"
                       key={note.id}
                     >
-                      {note.text}
+                      <p>{note.text}</p>
+                      <button
+                        className={`no-print mt-3 inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:text-stone-400 ${
+                          note.thumbsUpParticipantIds?.includes(participantId)
+                            ? "border-sky-600 bg-sky-50 text-sky-700"
+                            : "border-stone-300 text-stone-700 hover:border-stone-950"
+                        }`}
+                        aria-label={`Thumbs up ${note.thumbsUpParticipantIds?.length ?? 0}`}
+                        disabled={isSaving || !participantId}
+                        onClick={() => handleToggleThumbsUp(column.key, note.id)}
+                        type="button"
+                      >
+                        <svg
+                          aria-hidden="true"
+                          className="h-4 w-4"
+                          fill={
+                            note.thumbsUpParticipantIds?.includes(participantId)
+                              ? "currentColor"
+                              : "none"
+                          }
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="2"
+                          viewBox="0 0 24 24"
+                        >
+                          <path d="M7 10v11" />
+                          <path d="M15 6.5 14 10h5.2a2 2 0 0 1 2 2.4l-1.2 6a3 3 0 0 1-3 2.6H7V10h2.3a2 2 0 0 0 1.7-1l3-5a1.7 1.7 0 0 1 3.1 1.3L15 6.5Z" />
+                          <path d="M3 10h4v11H3z" />
+                        </svg>
+                        <span>{note.thumbsUpParticipantIds?.length ?? 0}</span>
+                      </button>
+                      <p className="print-only mt-2 text-xs font-semibold text-stone-600">
+                        Thumbs up: {note.thumbsUpParticipantIds?.length ?? 0}
+                      </p>
                     </article>
                   ))
                 ) : (
