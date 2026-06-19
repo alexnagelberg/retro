@@ -436,10 +436,6 @@ export function RetroBoard({ initialSessionId }: RetroBoardProps) {
                 : `${durationMinutes}:00`}
             </span>
           </div>
-
-          <p className="text-sm font-medium text-stone-600">
-            Notes open only while the timer is running.
-          </p>
         </div>
 
         <p className="text-sm font-medium text-stone-600">
