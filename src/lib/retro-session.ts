@@ -288,3 +288,11 @@ export async function toggleThumbsUp(
     },
   });
 }
+
+export async function setRefreshedEpoch(epochSeconds = Math.floor(Date.now() / 1000)) {
+  const client = await getRedis();
+
+  await client.set("REFRESHED", epochSeconds.toString());
+
+  return epochSeconds;
+}
