@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   addNote,
   configureSession,
+  deleteNote,
+  editNote,
   getSession,
   getSessionId,
   resetSession,
@@ -12,7 +14,15 @@ import {
 } from "@/lib/retro-session";
 
 type SessionRequestBody = {
-  action?: "configure" | "start" | "stop" | "reset" | "addNote" | "toggleThumbsUp";
+  action?:
+    | "configure"
+    | "start"
+    | "stop"
+    | "reset"
+    | "addNote"
+    | "editNote"
+    | "deleteNote"
+    | "toggleThumbsUp";
   sessionId?: string;
   durationMinutes?: number;
   column?: RetroColumn;
@@ -67,6 +77,21 @@ export async function POST(request: NextRequest) {
         break;
       case "addNote":
         session = await addNote(sessionId, body.column as RetroColumn, body.text ?? "");
+        break;
+      case "editNote":
+        session = await editNote(
+          sessionId,
+          body.column as RetroColumn,
+          body.noteId ?? "",
+          body.text ?? "",
+        );
+        break;
+      case "deleteNote":
+        session = await deleteNote(
+          sessionId,
+          body.column as RetroColumn,
+          body.noteId ?? "",
+        );
         break;
       case "toggleThumbsUp":
         session = await toggleThumbsUp(

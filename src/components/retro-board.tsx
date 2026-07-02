@@ -45,6 +45,12 @@ type RetroBoardProps = {
   initialSessionId: string;
 };
 
+type EditingNote = {
+  column: RetroColumn;
+  noteId: string;
+  text: string;
+};
+
 export function RetroBoard({ initialSessionId }: RetroBoardProps) {
   const router = useRouter();
   const [sessionId, setSessionId] = useState(() =>
@@ -62,6 +68,7 @@ export function RetroBoard({ initialSessionId }: RetroBoardProps) {
   });
   const [isSaving, setIsSaving] = useState(false);
   const [participantId, setParticipantId] = useState("");
+  const [editingNote, setEditingNote] = useState<EditingNote | null>(null);
   const [error, setError] = useState("");
   const shareUrl = `/${encodeURIComponent(sessionId)}`;
 
@@ -92,6 +99,8 @@ export function RetroBoard({ initialSessionId }: RetroBoardProps) {
       | { action: "stop" }
       | { action: "reset" }
       | { action: "addNote"; column: RetroColumn; text: string }
+      | { action: "editNote"; column: RetroColumn; noteId: string; text: string }
+      | { action: "deleteNote"; column: RetroColumn; noteId: string }
       | {
           action: "toggleThumbsUp";
           column: RetroColumn;
@@ -227,13 +236,40 @@ export function RetroBoard({ initialSessionId }: RetroBoardProps) {
     event.preventDefault();
 
     const text = drafts[column].trim();
+    const canAddToColumn = Boolean(
+      session && (canAddNotes || column === "actionItems"),
+    );
 
-    if (!text || !canAddNotes) {
+    if (!text || !canAddToColumn) {
       return;
     }
 
     setDrafts((currentDrafts) => ({ ...currentDrafts, [column]: "" }));
     updateSession({ action: "addNote", column, text });
+  }
+
+  function handleEditNote(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!editingNote?.text.trim()) {
+      return;
+    }
+
+    updateSession({
+      action: "editNote",
+      column: editingNote.column,
+      noteId: editingNote.noteId,
+      text: editingNote.text,
+    });
+    setEditingNote(null);
+  }
+
+  function handleDeleteNote(column: RetroColumn, noteId: string) {
+    if (editingNote?.column === column && editingNote.noteId === noteId) {
+      setEditingNote(null);
+    }
+
+    updateSession({ action: "deleteNote", column, noteId });
   }
 
   function handleToggleThumbsUp(column: RetroColumn, noteId: string) {
@@ -467,9 +503,20 @@ export function RetroBoard({ initialSessionId }: RetroBoardProps) {
                 className="no-print grid gap-2 border-b border-stone-200 p-3"
                 onSubmit={(event) => handleAddNote(event, column.key)}
               >
+                {(() => {
+                  const canAddToColumn =
+                    Boolean(session && (canAddNotes || column.key === "actionItems"));
+                  const placeholder = canAddToColumn
+                    ? column.key === "actionItems"
+                      ? "Add an action item..."
+                      : "Add a note..."
+                    : "Start the timer to add notes";
+
+                  return (
+                    <>
                 <textarea
                   className="min-h-24 resize-none rounded-md border border-stone-300 p-3 text-sm leading-6 outline-none transition placeholder:text-stone-400 focus:border-stone-950 disabled:bg-stone-100"
-                  disabled={!canAddNotes || isSaving}
+                  disabled={!canAddToColumn || isSaving}
                   maxLength={280}
                   onChange={(event) => {
                     const nextValue = event.currentTarget.value;
@@ -479,18 +526,21 @@ export function RetroBoard({ initialSessionId }: RetroBoardProps) {
                       [column.key]: nextValue,
                     }));
                   }}
-                  placeholder={
-                    canAddNotes ? "Add a note..." : "Start the timer to add notes"
-                  }
+                  placeholder={placeholder}
                   value={drafts[column.key]}
                 />
                 <button
                   className="h-9 rounded-md bg-stone-950 px-3 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
-                  disabled={!canAddNotes || isSaving || !drafts[column.key].trim()}
+                  disabled={
+                    !canAddToColumn || isSaving || !drafts[column.key].trim()
+                  }
                   type="submit"
                 >
                   Add note
                 </button>
+                    </>
+                  );
+                })()}
               </form>
 
               <div className="grid content-start gap-3 overflow-y-auto p-3">
@@ -500,38 +550,103 @@ export function RetroBoard({ initialSessionId }: RetroBoardProps) {
                       className="rounded-md border border-stone-200 bg-[#fffdf8] p-3 text-sm leading-6 text-stone-800 shadow-sm"
                       key={note.id}
                     >
-                      <p>{note.text}</p>
-                      <button
-                        className={`no-print mt-3 inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:text-stone-400 ${
-                          note.thumbsUpParticipantIds?.includes(participantId)
-                            ? "border-sky-600 bg-sky-50 text-sky-700"
-                            : "border-stone-300 text-stone-700 hover:border-stone-950"
-                        }`}
-                        aria-label={`Thumbs up ${note.thumbsUpParticipantIds?.length ?? 0}`}
-                        disabled={isSaving || !participantId}
-                        onClick={() => handleToggleThumbsUp(column.key, note.id)}
-                        type="button"
-                      >
-                        <svg
-                          aria-hidden="true"
-                          className="h-4 w-4"
-                          fill={
+                      {editingNote?.column === column.key &&
+                      editingNote.noteId === note.id ? (
+                        <form className="no-print grid gap-2" onSubmit={handleEditNote}>
+                          <textarea
+                            className="min-h-24 resize-none rounded-md border border-stone-300 p-3 text-sm leading-6 outline-none transition focus:border-stone-950 disabled:bg-stone-100"
+                            disabled={isSaving}
+                            maxLength={280}
+                            onChange={(event) => {
+                              const nextValue = event.currentTarget.value;
+
+                              setEditingNote((currentEdit) =>
+                                currentEdit
+                                  ? {
+                                      ...currentEdit,
+                                      text: nextValue,
+                                    }
+                                  : currentEdit,
+                              );
+                            }}
+                            value={editingNote.text}
+                          />
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              className="rounded-md bg-stone-950 px-3 py-1 text-xs font-semibold text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
+                              disabled={isSaving || !editingNote.text.trim()}
+                              type="submit"
+                            >
+                              Save
+                            </button>
+                            <button
+                              className="rounded-md border border-stone-300 px-3 py-1 text-xs font-semibold text-stone-700 transition hover:border-stone-950 disabled:cursor-not-allowed disabled:text-stone-400"
+                              disabled={isSaving}
+                              onClick={() => setEditingNote(null)}
+                              type="button"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </form>
+                      ) : (
+                        <p>{note.text}</p>
+                      )}
+                      <div className="no-print mt-3 flex flex-wrap items-center gap-2">
+                        <button
+                          className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:text-stone-400 ${
                             note.thumbsUpParticipantIds?.includes(participantId)
-                              ? "currentColor"
-                              : "none"
-                          }
-                          stroke="currentColor"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth="2"
-                          viewBox="0 0 24 24"
+                              ? "border-sky-600 bg-sky-50 text-sky-700"
+                              : "border-stone-300 text-stone-700 hover:border-stone-950"
+                          }`}
+                          aria-label={`Thumbs up ${note.thumbsUpParticipantIds?.length ?? 0}`}
+                          disabled={isSaving || !participantId}
+                          onClick={() => handleToggleThumbsUp(column.key, note.id)}
+                          type="button"
                         >
-                          <path d="M7 10v11" />
-                          <path d="M15 6.5 14 10h5.2a2 2 0 0 1 2 2.4l-1.2 6a3 3 0 0 1-3 2.6H7V10h2.3a2 2 0 0 0 1.7-1l3-5a1.7 1.7 0 0 1 3.1 1.3L15 6.5Z" />
-                          <path d="M3 10h4v11H3z" />
-                        </svg>
-                        <span>{note.thumbsUpParticipantIds?.length ?? 0}</span>
-                      </button>
+                          <svg
+                            aria-hidden="true"
+                            className="h-4 w-4"
+                            fill={
+                              note.thumbsUpParticipantIds?.includes(participantId)
+                                ? "currentColor"
+                                : "none"
+                            }
+                            stroke="currentColor"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="2"
+                            viewBox="0 0 24 24"
+                          >
+                            <path d="M7 10v11" />
+                            <path d="M15 6.5 14 10h5.2a2 2 0 0 1 2 2.4l-1.2 6a3 3 0 0 1-3 2.6H7V10h2.3a2 2 0 0 0 1.7-1l3-5a1.7 1.7 0 0 1 3.1 1.3L15 6.5Z" />
+                            <path d="M3 10h4v11H3z" />
+                          </svg>
+                          <span>{note.thumbsUpParticipantIds?.length ?? 0}</span>
+                        </button>
+                        <button
+                          className="rounded-md border border-stone-300 px-2 py-1 text-xs font-semibold text-stone-700 transition hover:border-stone-950 disabled:cursor-not-allowed disabled:text-stone-400"
+                          disabled={isSaving}
+                          onClick={() =>
+                            setEditingNote({
+                              column: column.key,
+                              noteId: note.id,
+                              text: note.text,
+                            })
+                          }
+                          type="button"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          className="rounded-md border border-red-200 px-2 py-1 text-xs font-semibold text-red-700 transition hover:border-red-500 disabled:cursor-not-allowed disabled:text-red-300"
+                          disabled={isSaving}
+                          onClick={() => handleDeleteNote(column.key, note.id)}
+                          type="button"
+                        >
+                          Delete
+                        </button>
+                      </div>
                       <p className="print-only mt-2 text-xs font-semibold text-stone-600">
                         Thumbs up: {note.thumbsUpParticipantIds?.length ?? 0}
                       </p>

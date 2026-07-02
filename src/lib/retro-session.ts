@@ -216,7 +216,7 @@ export async function addNote(
 
   const session = await getSession(sessionId);
 
-  if (session.status !== "running") {
+  if (column !== "actionItems" && session.status !== "running") {
     throw new Error("Notes can only be added while the timer is running.");
   }
 
@@ -238,6 +238,73 @@ export async function addNote(
     columns: {
       ...session.columns,
       [column]: [note, ...session.columns[column]],
+    },
+  });
+}
+
+export async function editNote(
+  sessionId: string,
+  column: RetroColumn,
+  noteId: string,
+  noteText: string,
+) {
+  if (!columnKeys.includes(column)) {
+    throw new Error("Unknown retro column.");
+  }
+
+  const text = noteText.trim();
+
+  if (!text) {
+    throw new Error("Notes cannot be empty.");
+  }
+
+  const session = await getSession(sessionId);
+  const notes = session.columns[column];
+  const noteIndex = notes.findIndex((note) => note.id === noteId);
+
+  if (noteIndex === -1) {
+    throw new Error("Note not found.");
+  }
+
+  const updatedNotes = notes.map((note, index) =>
+    index === noteIndex
+      ? {
+          ...normalizeNote(note),
+          text: text.slice(0, 280),
+        }
+      : note,
+  );
+
+  return saveSession({
+    ...session,
+    columns: {
+      ...session.columns,
+      [column]: updatedNotes,
+    },
+  });
+}
+
+export async function deleteNote(
+  sessionId: string,
+  column: RetroColumn,
+  noteId: string,
+) {
+  if (!columnKeys.includes(column)) {
+    throw new Error("Unknown retro column.");
+  }
+
+  const session = await getSession(sessionId);
+  const notes = session.columns[column];
+
+  if (!notes.some((note) => note.id === noteId)) {
+    throw new Error("Note not found.");
+  }
+
+  return saveSession({
+    ...session,
+    columns: {
+      ...session.columns,
+      [column]: notes.filter((note) => note.id !== noteId),
     },
   });
 }
